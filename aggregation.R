@@ -112,7 +112,8 @@ getAgeAtStartCatChurnFull <- Vectorize(
     else if (ageatstart <= 11) cat <- 11
     else if (ageatstart <= 14) cat <- 14
     else if (ageatstart <= 26) cat <- 26
-    else cat <- 27 # more than 26
+    else if (ageatstart <= 38) cat <- 38
+    else cat <- 39  # more than 26
     
     cat
   }
