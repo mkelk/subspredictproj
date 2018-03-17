@@ -10,11 +10,11 @@ knitr::opts_chunk$set(echo = TRUE, warning=F, message=F)
 library(dplyr)
 library(ggplot2)
 library(caret)
-library(dplyr)
 library(DT)
 library(lubridate)
 
 source('aggregation.R')
+source('lifetimepredictor.R')
 
 # some configuration
 SLIMDATA <- T
@@ -174,14 +174,6 @@ Slim to only recent expiries
 
 Add churncat and other cats to subs
 ```{r}
-
-tmp <- subs3 %>%
-  addSiteVerCats() %>%
-  addAgeAtStartCatsChurn() %>%
-  addSiteVerKeyCatChurn()
-
-
-
 subs4 <- subs3 %>% 
   addChurnCatsEtc()
 ```
@@ -243,10 +235,9 @@ Print the predictions
 ```{r}
 tblpred <- predictions %>%
   dplyr::select(siteverkeycatchurn, marketcat, ageatstartcatchurn, custchosensubslengthcatchurn, months, 
-                churncatnomarket, monthchurn, predictmonthchurn) %>%
+                churncatnomarket, monthchurn, predictmonthchurn, numobs) %>%
   dplyr::arrange(siteverkeycatchurn, marketcat, ageatstartcatchurn, custchosensubslengthcatchurn, months, churncatnomarket)
 DT::datatable(tblpred, options = list(pageLength = 50), rownames = FALSE, filter = 'top') %>%formatRound( columns=c(6,7), digits=3)
-
 ```
 
 
@@ -280,3 +271,19 @@ plot3mhistory("FR", predictions)
 plot3mhistory("GB", predictions)
 ```
 
+Primitive lifetime prediction using 1-3-3-3-3- model
+
+```{r}
+simplepredictor3m(new_model, "DK", "US")
+simplepredictor3m(new_model, "NO", "US")
+simplepredictor3m(new_model, "CH", "US")
+simplepredictor3m(new_model, "FR", "US")
+simplepredictor3m(new_model, "US", "US")
+simplepredictor3m(new_model, "FI", "US")
+simplepredictor3m(new_model, "SE", "US")
+simplepredictor3m(new_model, "GB", "US")
+simplepredictor3m(new_model, "NL", "US")
+simplepredictor3m(new_model, "IT", "US")
+simplepredictor3m(new_model, "BE", "US")
+simplepredictor3m(new_model, "AU", "US")
+```
