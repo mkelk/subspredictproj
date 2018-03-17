@@ -97,7 +97,7 @@ We want to investigate how good a model we can create exploring this idea.
      prediction models and different aggregations can programmatically be "plugged in" to a general engine that performs
 	 all the analysis on a given model.
    
-# initial.Rmd
+# twodim-logmonthlychurn.Rmd
 
 This is a *very messy* throw together of bits of code from various different projects. It only serves to document
 what I am thinking and do some initial proof-of-concept that the approach outlined above can provide good estimates
