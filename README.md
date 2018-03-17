@@ -58,7 +58,16 @@ It seems that a we get a lot of good results from a generalized linear model tha
    viewed from the structure dimension
 
 We want to investigate how good a model we can create exploring this idea.
-	 
+
+Important note: For doing the model, I am using:
+
+```R
+new_model=glm(logmonthchurn~marketcat+churncatnomarket, data=churntable, weights = churntable$weight)
+```
+
+Very little insight has gone into whether this is actually a good choice for this problem. But 
+good results seem to come out.
+
 # Idea of how to approach the project
 
 1. Find a model that predicts churn reasonably well as a function of market, age, periodlength, device, etc.
