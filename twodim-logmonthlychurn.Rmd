@@ -1,5 +1,5 @@
 ---
-title: "Subs-predict - initial stuff to get started"
+title: "Churn: Two dimensions and predict log of monthly churn probability"
 date: "March 16, 2018"
 output: html_notebook
 ---
@@ -18,7 +18,7 @@ source('aggregation.R')
 
 # some configuration
 SLIMDATA <- T
-slimfactor <- 1.0
+slimfactor <- 1.0 # use this to slim data for faster experimentation
 
 periodendcutoff <- parse_date_time('2017-01-01', 'ymd')
 beginwindow <- parse_date_time('2017-09-01', 'ymd')
@@ -220,6 +220,14 @@ summary(new_model)
 anova(new_model, test="Chisq")
 ```
 
+Add predictions
+
+```{r}
+predictions <- churntable
+predictions$predictlogmonthchurn <- predict(new_model, type="response")
+predictions <- predictions %>% dplyr::mutate(predictmonthchurn = exp(predictlogmonthchurn)) 
+```
+
 What is the dimensionality?
 ```{r}
 dimstructure <- predictions %>% dplyr::group_by(churncatnomarket) %>% dplyr::summarise()
@@ -229,15 +237,6 @@ length(dimmarket$marketcat)
 length(dimstructure$churncatnomarket) * length(dimmarket$marketcat)
 ```
 
-
-
-Add predictions
-
-```{r}
-predictions <- churntable
-predictions$predictlogmonthchurn <- predict(new_model, type="response")
-predictions <- predictions %>% dplyr::mutate(predictmonthchurn = exp(predictlogmonthchurn)) 
-```
 
 Print the predictions
 
