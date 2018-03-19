@@ -1,0 +1,225 @@
+---
+title: "Churn: Two dimensions and predict log of monthly churn probability"
+output: html_notebook
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning=F, message=F)
+
+library(tidyverse)
+library(lubridate)
+
+source('new_aggregation.R')
+# source('new_lifetimepredictor.R')
+
+# some configuration
+SAMPLE_DATA <- FALSE
+fraction_sample <- 0.01 # use this to slim data for faster experimentation
+
+period_end_cutoff <- parse_date_time('2017-01-01', 'ymd')
+begin_train_window <- parse_date_time('2017-01-01', 'ymd')
+begin_validation_window <- parse_date_time('2017-09-01', 'ymd')
+end_window <- parse_date_time('2018-01-01', 'ymd')
+last_valid_month <- '2018-03-01'
+
+valid_subscription_lengths <- c(1,3,12,24)
+```
+
+Getting the data
+
+```{r reading, tidy=F}
+if (!exists('customers_org'))
+{
+  # don't read again, we've already got it
+  customers_org <- read.table(file = '../data/CustomersV2.export.tsv', sep = '\t', header = TRUE, stringsAsFactors = F)
+  subscriptions_org <- read.table(file = '../data/SubscriptionsV2.export.tsv', sep = '\t', header = TRUE,
+                     stringsAsFactors=F)
+
+  gdp <- read.table(file = '../data/gdp-simple.export.tsv', sep = '\t', header = TRUE, stringsAsFactors=F) %>%
+    rename(marketname = market, 
+           gdppercapita = gdppercapita2016)
+  }
+```
+
+Optionally sample the data for faster development
+
+```{r customers_processing, tidy=F}
+customers <- customers_org %>%
+  # Optionally slimming the data for faster development
+  sample_frac(if (SAMPLE_DATA) fraction_sample else 1)
+```
+
+```{r subscriptions_processing, tidy=F}
+subscriptions <- subscriptions_org %>% 
+  select(-c(periodstart, periodend)) %>%
+
+    # Removing customers not in the customers set
+  filter(customerid %in% customers$customerid) %>%
+
+  mutate_at(vars(startmonth, endmonth), as.Date) %>%
+  mutate(months = (year(endmonth) -  year(startmonth)) * 12 + month(endmonth) -  month(startmonth)) %>%
+  
+  group_by(customerid) %>%
+  # Removing customers with subscription period other than 1,3,12,24
+  filter(min(months %in% valid_subscription_lengths) == 1) %>%
+  # Removing customers with startmonth after '2018-03-01'
+  filter(max(startmonth) <= last_valid_month) %>%
+  
+  arrange(startmonth) %>%
+  mutate(status = if_else(endmonth == max(endmonth) & endmonth <  last_valid_month, 'churn', 'active'),
+         num_previous_months = cumsum(months) - months,
+         num_previous_subs = row_number() - 1) %>%
+  ungroup() %>%
+  
+  inner_join(customers, by = 'customerid') %>%
+  mutate_at(vars(firstpaiddate, firstpaidmonth), funs(as.Date)) %>%
+  left_join(gdp, by='marketname') %>%
+  mutate(gdppercapita = if_else(is.na(gdppercapita), mean(gdppercapita, na.rm = T), gdppercapita)) %>%
+  mutate(gdppercapita_scaled = as.vector(scale(gdppercapita, center = T, scale = T))) %>%
+  filter(endmonth >= period_end_cutoff)
+  
+```
+
+
+Add churncat and other cats to subs
+```{r}
+# num_previous_months_breaks <- c(3, 6, 9)
+num_previous_months_breaks <- c(0, 1, 2, 3, 5, 8, 11, 14, 26, 38)
+age_to_join_sitevers <- 5
+
+
+subscriptions_with_cats <- subscriptions %>%
+  mutate(market_category = budgetMarket(marketname),
+         num_previous_months_binned = as.numeric(as.character(cut(num_previous_months, 
+                                                                  breaks = c(-Inf, num_previous_months_breaks, Inf), 
+                                                                  labels = c(num_previous_months_breaks, max(num_previous_months_breaks) + 1)))),
+         siteverkey_cat = if_else(siteverkey == "US", "SS", "ORG"),
+         siteverkey_cat2 = if_else(num_previous_months_binned <= age_to_join_sitevers, siteverkey_cat, 'MUT'),
+         chosen_subs_length = if_else( (siteverkey_cat == "SS" & num_previous_months == 0) | (siteverkey_cat != "SS" & num_previous_months == 1), 
+                                        as.character(paymentperiodchosenatstart),
+                                        'gen')
+         ) %>%
+  mutate(subscription_summary = sprintf("mc-%s_ssc-%s_ac-%d_m-%d_ccsl-%s", market_category, siteverkey_cat2, num_previous_months_binned, months, chosen_subs_length),
+         subscription_summary_no_market = sprintf("ssc-%s_ac-%d_m-%d_ccsl-%s", siteverkey_cat2, num_previous_months_binned, months, chosen_subs_length)) %>%
+  mutate_if(is.character, funs(as.factor))
+  
+    
+```
+
+```{r}
+summary(subscriptions_with_cats)
+```
+
+Prepare churntable that we want to predicdt
+
+```{r}
+churntable <- subscriptions_with_cats %>%
+  # restrict to a recent expiry window
+  filter(endmonth >= begin_train_window & endmonth < end_window) %>%
+  mutate(set_type = as.factor(if_else(endmonth >= begin_validation_window, 'validation', 'training'))) %>%
+  mutate(churnind = ifelse(status == 'churn', 1, 0)) %>%
+  group_by(set_type, siteverkey_cat2, market_category, months, num_previous_months_binned, chosen_subs_length, subscription_summary_no_market) %>%
+  summarise(num_obs = n(), 
+            churned = sum(churnind)) %>%
+  group_by(set_type) %>%
+  mutate(churn_rate = churned / num_obs,
+         renew_rate = 1 - churn_rate,
+         month_churn = 1 - renew_rate ^ (1/as.double(months)),
+         log_month_churn = log(month_churn),
+         weight = num_obs / sum(num_obs))
+
+# NB! Does this introduce a bad bias ????
+churntable_no_zeros <- churntable %>%
+  filter(churn_rate > 0)
+```
+
+```{r}
+summary(churntable)
+```
+```{r}
+summary(churntable_no_zeros)
+```
+
+
+Calculate model
+
+```{r}
+new_model=glm(log_month_churn ~ market_category + subscription_summary_no_market, data=churntable_no_zeros[churntable_no_zeros$set_type == 'training', ], weights = weight)
+summary(new_model)
+
+anova(new_model, test="Chisq")
+```
+
+Add predictions
+
+```{r}
+valid_summary_values <- churntable_no_zeros$subscription_summary_no_market[churntable_no_zeros$set_type == 'training']
+
+predictions <- churntable_no_zeros %>% 
+  ungroup() %>%
+  filter(subscription_summary_no_market %in% valid_summary_values) %>%
+  # predict(new_model, type="response", newdata = .) %>% length
+  mutate(., predict_log_month_churn = predict(new_model, type="response", newdata = .)) %>%
+  mutate(predict_month_churn = exp(predict_log_month_churn)) 
+```
+
+What is the dimensionality?
+```{r}
+sprintf('subscription_summary_no_market: %d distinct values', n_distinct(predictions$subscription_summary_no_market))
+sprintf('market_category: %d distinct values', n_distinct(predictions$market_category))
+sprintf('product: %d', n_distinct(predictions$subscription_summary_no_market) * n_distinct(predictions$market_category))
+```
+
+
+Print the predictions
+
+```{r}
+predictions
+```
+
+Do some plotting
+
+```{r}
+plot3mhistory <- function(market, pred)
+{
+  pred %>%
+    filter(market_category == market & siteverkey_cat2 != "ORG" &
+             (
+               (num_previous_months_binned == 0 & months == 1 & chosen_subs_length == 3) |
+               (num_previous_months_binned != 0 & months == 3 & chosen_subs_length == 'gen')
+             )
+    ) %>%
+    select(set_type, num_previous_months_binned, month_churn, predict_month_churn) %>%
+    gather(variable, value, -c(num_previous_months_binned, set_type)) %>%
+    ggplot(aes(x=num_previous_months_binned, y=value, color=variable)) + 
+    geom_line() + 
+    geom_point() + 
+    ggtitle(market) +
+    facet_wrap(~set_type) +
+    theme_bw()
+}
+
+plot3mhistory("DK", predictions)
+plot3mhistory("NO", predictions)
+plot3mhistory("SE", predictions)
+plot3mhistory("US", predictions)
+plot3mhistory("FR", predictions)
+plot3mhistory("GB", predictions)
+```
+
+Primitive lifetime prediction using 1-3-3-3-3- model
+
+```{r}
+# simplepredictor3m(new_model, "DK", "US")
+# simplepredictor3m(new_model, "NO", "US")
+# simplepredictor3m(new_model, "CH", "US")
+# simplepredictor3m(new_model, "FR", "US")
+# simplepredictor3m(new_model, "US", "US")
+# simplepredictor3m(new_model, "FI", "US")
+# simplepredictor3m(new_model, "SE", "US")
+# simplepredictor3m(new_model, "GB", "US")
+# simplepredictor3m(new_model, "NL", "US")
+# simplepredictor3m(new_model, "IT", "US")
+# simplepredictor3m(new_model, "BE", "US")
+# simplepredictor3m(new_model, "AU", "US")
+```
