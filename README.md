@@ -123,3 +123,6 @@ starting point.
 
 Other parts of the code is copy-paste from other projects on Upwork. And still other parts is glue that I wrote yesterday.
 The goal was not pretty, well-structured or maintanable code, but rather to provide you with information *fast*.
+
+# Stuff to look into   
+  * Understand "kink" in churn curves around 5 months of age.
