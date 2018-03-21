@@ -37,15 +37,15 @@ customers <- customers_org %>%
 subscriptions <- subscriptions_org %>%
   # Removing customers not in the customers set
   filter(customerid %in% customers$customerid) %>%
-  
+
   processSubscriptions() %>%
-  
+
   joinProcessCustomers(customers, age_to_join_sitevers = 5) %>%
-  
+
   joinProcessGDP(gdp) %>%
-  
+
   concatCategrories() %>%
-  
+
   mutate_if(is.character, funs(as.factor))
   
 ```
@@ -115,6 +115,14 @@ model_validation$summary_table
 model_validation$roc_plot
 ```
 
+```{r results='hide',fig.keep='all'}
+model_validation$calibration_plots
+```
+
+```{r results='hide',fig.keep='all'}
+model_validation$real_churn_plot
+```
+
 Try simple logistic model
 ```{r}
 model_logit <- glm(churnind ~ market_category + siteverkey_cat2 + num_previous_months_binned + months + chosen_subs_length,
@@ -131,84 +139,11 @@ model_validation_logit$summary_table
 ```{r}
 model_validation_logit$roc_plot
 ```
-
-
-
-
-
-
-
-
-Add predictions
-
-```{r}
-valid_summary_values <- churntable_no_zeros$subscription_summary_no_market[churntable_no_zeros$set_type == 'training']
-
-predictions <- churntable_no_zeros %>% 
-  ungroup() %>%
-  filter(subscription_summary_no_market %in% valid_summary_values) %>%
-  # predict(new_model, type="response", newdata = .) %>% length
-  mutate(., predict_log_month_churn = predict(new_model, type="response", newdata = .)) %>%
-  mutate(predict_month_churn = exp(predict_log_month_churn)) 
+```{r results='hide',fig.keep='all'}
+model_validation_logit$calibration_plots
 ```
-
-What is the dimensionality?
-```{r}
-sprintf('subscription_summary_no_market: %d distinct values', n_distinct(predictions$subscription_summary_no_market))
-sprintf('market_category: %d distinct values', n_distinct(predictions$market_category))
-sprintf('product: %d', n_distinct(predictions$subscription_summary_no_market) * n_distinct(predictions$market_category))
+```{r results='hide',fig.keep='all'}
+model_validation_logit$real_churn_plot
 ```
 
 
-Print the predictions
-
-```{r}
-predictions
-```
-
-Do some plotting
-
-```{r}
-plot3mhistory <- function(market, pred)
-{
-  pred %>%
-    filter(market_category == market & siteverkey_cat2 != "ORG" &
-             (
-               (num_previous_months_binned == 0 & months == 1 & chosen_subs_length == 3) |
-               (num_previous_months_binned != 0 & months == 3 & chosen_subs_length == 'gen')
-             )
-    ) %>%
-    select(set_type, num_previous_months_binned, month_churn, predict_month_churn) %>%
-    gather(variable, value, -c(num_previous_months_binned, set_type)) %>%
-    ggplot(aes(x=num_previous_months_binned, y=value, color=variable)) + 
-    geom_line() + 
-    geom_point() + 
-    ggtitle(market) +
-    facet_wrap(~set_type) +
-    theme_bw()
-}
-
-plot3mhistory("DK", predictions)
-plot3mhistory("NO", predictions)
-plot3mhistory("SE", predictions)
-plot3mhistory("US", predictions)
-plot3mhistory("FR", predictions)
-plot3mhistory("GB", predictions)
-```
-
-Primitive lifetime prediction using 1-3-3-3-3- model
-
-```{r}
-# simplepredictor3m(new_model, "DK", "US")
-# simplepredictor3m(new_model, "NO", "US")
-# simplepredictor3m(new_model, "CH", "US")
-# simplepredictor3m(new_model, "FR", "US")
-# simplepredictor3m(new_model, "US", "US")
-# simplepredictor3m(new_model, "FI", "US")
-# simplepredictor3m(new_model, "SE", "US")
-# simplepredictor3m(new_model, "GB", "US")
-# simplepredictor3m(new_model, "NL", "US")
-# simplepredictor3m(new_model, "IT", "US")
-# simplepredictor3m(new_model, "BE", "US")
-# simplepredictor3m(new_model, "AU", "US")
-```
