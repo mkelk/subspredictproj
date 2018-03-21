@@ -1,4 +1,5 @@
 knitr::opts_chunk$set(echo = TRUE, warning=F, message=F)
+knitr::opts_knit$set(global.device = TRUE)
 
 # source files
 customers_file <- '../data/CustomersV2.export.tsv'
