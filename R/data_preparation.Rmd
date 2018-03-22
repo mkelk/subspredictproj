@@ -1,0 +1,66 @@
+---
+title: "Data preparation"
+output: html_notebook
+---
+
+This is workflow reads, process and stores input datasets for further usage in predictive modeling. The input sets are:
+
+* customers
+* subscriptions
+* GDP
+
+The output is *subscriptions.rds* file.
+
+
+```{r setup, include=FALSE}
+source('config.R')
+source('utils.R')
+source('utils_validation.R')
+
+# sampling for dev
+# SAMPLE_DATA <- TRUE
+SAMPLE_DATA <- FALSE
+fraction_sample <- 0.01 # use this to slim data for faster experimentation
+```
+
+Getting the data
+
+```{r reading, tidy=F}
+readData(customers_file, subscriptions_file, gdp_file)
+```
+
+Optionally sample the data for faster development
+
+```{r customers_processing, tidy=F}
+customers <- customers_org %>%
+  processCustomers(SAMPLE_DATA, fraction_sample)
+
+
+
+subscriptions <- subscriptions_org %>%
+  # Removing customers not in the customers set
+  filter(customerid %in% customers$customerid) %>%
+
+  processSubscriptions() %>%
+
+  joinProcessCustomers(customers, age_to_join_sitevers = 5) %>%
+
+  joinProcessGDP(gdp) %>%
+
+  concatCategrories() %>%
+
+  mutate_if(is.character, funs(as.factor))
+  
+write_rds(subscriptions, '../data/subscriptions.rds')
+
+# subscriptions <- read_rds('../data/subscriptions.rds')
+```
+
+```{r}
+summary(subscriptions)
+```
+
+```{r}
+DT::datatable(subscriptions %>% sample_n(10^3), options = list(pageLength = 50), rownames = FALSE, filter = 'top')
+```
+
