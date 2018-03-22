@@ -66,8 +66,8 @@ Model validation for training (2017-01-01 - 2017-08-01) and validation (2017-09-
     + AUC, logloss - prediction quality metrics
 * ROC curve
 * Plots per market
-    + Age of customers vs real and predicted probability of churn for different subscription lengths
-    + Calibration - Predicted probability of churn vs real probability of churn for different subscription lengths (well calibrated prediction should form a diagonal line)
+    + Age of customers vs real and predicted probability of churn for different subscription lengths. It shows if we are correctly predicting probability of churn for customers over lifetime.
+    + Calibration - Predicted probability of churn vs real probability of churn for different subscription lengths (well calibrated prediction should form a diagonal line). Shows if outcome of model in question can be realy treated as probability.
 
 ```{r warning=F}
 prediction_table <- validation(subscriptions_with_target, new_model, predict_2fct_model)
@@ -91,9 +91,8 @@ Model validation for training (2017-01-01 - 2017-08-01) and validation (2017-09-
     + AUC, logloss - prediction quality metrics
 * ROC curve
 * Plots per market
-    + Age of customers vs real and predicted probability of churn for different subscription lengths
-    + Calibration - Predicted probability of churn vs real probability of churn for different subscription lengths (well calibrated prediction should form a diagonal line)
-
+    + Age of customers vs real and predicted probability of churn for different subscription lengths. It shows if we are correctly predicting probability of churn for customers over lifetime.
+    + Calibration - Predicted probability of churn vs real probability of churn for different subscription lengths (well calibrated prediction should form a diagonal line). Shows if outcome of model in question can be realy treated as probability.
 ```{r warning=F}
 prediction_table_logit <- validation(subscriptions_with_target, model_logit)
 ```
