@@ -42,6 +42,9 @@ subscriptions <- subscriptions_org %>%
   processSubscriptions() %>%
 
   joinProcessCustomers(customers, age_to_join_sitevers = 5) %>%
+  
+  # Mortencomment: engineer three-to-one month variables
+  adjustAndAddThreeToOneVars() %>%
 
   joinProcessGDP(gdp) %>%
 

@@ -1,8 +1,9 @@
 knitr::opts_chunk$set(echo = TRUE, warning=F, message=F)
 
 # source files
-customers_file <- '../data/CustomersV2.export.tsv'
-subscriptions_file <- '../data/SubscriptionsV2.export.tsv'
+# Mortencomment: Read V3 data files instead of V2
+customers_file <- '../data/CustomersV3.export.tsv'
+subscriptions_file <- '../data/SubscriptionsV3.export.tsv'
 gdp_file <- '../data/gdp-simple.export.tsv'
 
 # time window settings

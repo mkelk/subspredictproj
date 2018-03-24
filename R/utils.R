@@ -17,7 +17,9 @@ processSubscriptions <- function(subscriptions,
                                  valid_subscription_lengths = c(1, 3, 12, 24), 
                                  num_previous_months_breaks = c(0, 1, 2, 3, 5, 8, 11, 14, 26, 38)) {
   subscriptions %>% 
-    select(-c(periodstart, periodend)) %>%
+    # Mortencomment: Need periodend for threetoone processing
+    #select(-c(periodstart, periodend)) %>%
+    select(-c(periodstart)) %>%
     
     # Removing customers not in the customers set
     filter(customerid %in% customers$customerid) %>%
@@ -100,6 +102,49 @@ joinProcessGDP <- function(subscriptions, gdp) {
     mutate(gdppercapita = if_else(is.na(gdppercapita), mean(gdppercapita, na.rm = T), gdppercapita)) %>%
     mutate(gdppercapita_scaled = as.vector(scale(gdppercapita, center = T, scale = T)))
 }
+
+
+# Mortencomment
+# Create states for three-to-one aspect
+# Some customers on three month plans are "by hand" set in a state where their next 
+# subscription (if not churned) is set to a slightly discounted one-month subs instead of the
+# normal 3 months subs that they would normally get.
+# we then continue giving them the discounted one-month subses.
+#
+# threetoonestartdate: The date from where we start treating these customers differently
+# isthreetoonesubs: 1 if this current subs is such a special one-month subs, 0 otherwise
+# isthreetoonestate: 1 if the next subs from this one _ought_ to be a special one-month subs
+adjustAndAddThreeToOneVars <- function(subscriptions)
+{
+  subscriptions %>%
+    # transform periodend and threetoonestartdatedt to dates for use a little later
+    dplyr::mutate(periodenddt = parse_date_time(as.character(periodend), "ymd HMS")) %>%
+    dplyr::mutate(threetoonestartdatedt = parse_date_time(as.character(threetoonestartdate), "ymd")) %>%
+    
+    # if the next subs is a threetoonesubs then the current subs codes for it, if it isn't, then it does not
+    dplyr::arrange(customerid, subscriptionid) %>%
+    dplyr::group_by(customerid) %>%
+    dplyr::mutate(isthreetoonestate = lead(isthreetoonesubs, default = NA)) %>%
+    dplyr::ungroup() %>%
+    
+    # if there is no next subs, we instead look at the startdate for three-to-one
+    # we execute orders around 10 days before subs expiry, take that into account
+    dplyr::mutate(isthreetoonestate = 
+                    ifelse(is.na(isthreetoonestate),
+                           # no next subs, infer from threetoonestartdate If exists and subs ends minus 10 days falls after 
+                           # threetoonestartdate, then it is in the three-to-one state
+                           ifelse(!is.na(threetoonestartdatedt) & periodenddt + days(-10) >= threetoonestartdatedt, 1, 0),
+                           # a next subs, don't introduce changes, use already present value
+                           isthreetoonestate
+                           )
+                  ) %>%
+    
+    # remove tmp variables and periodend, we are not using it anymore
+    dplyr::select(-periodend, -periodenddt, -threetoonestartdatedt)
+}
+
+
+
 
 concatCategrories <- function(subscriptions_with_customers) {
   subscriptions_with_customers %>%
