@@ -24,7 +24,7 @@ processSubscriptions <- function(subscriptions,
     # Removing customers not in the customers set
     filter(customerid %in% customers$customerid) %>%
     
-    mutate_at(vars(startmonth, endmonth), as.Date) %>%
+    mutate_at(vars(startmonth, endmonth, periodend), as.Date) %>%
     mutate(months = (year(endmonth) -  year(startmonth)) * 12 + month(endmonth) -  month(startmonth)) %>%
     
     group_by(customerid) %>%
@@ -92,7 +92,9 @@ joinProcessCustomers <- function(subscriptions, customers, age_to_join_sitevers 
            chosen_subs_length = if_else( (siteverkey_cat == "SS" & num_previous_months == 0) | (siteverkey_cat != "SS" & num_previous_months == 1), 
                                          as.character(paymentperiodchosenatstart),
                                          'gen')
-    )
+    ) %>%
+    # Mortencomment: engineer three-to-one month variables
+    adjustAndAddThreeToOneVars()
 }
 
 
@@ -102,7 +104,6 @@ joinProcessGDP <- function(subscriptions, gdp) {
     mutate(gdppercapita = if_else(is.na(gdppercapita), mean(gdppercapita, na.rm = T), gdppercapita)) %>%
     mutate(gdppercapita_scaled = as.vector(scale(gdppercapita, center = T, scale = T)))
 }
-
 
 # Mortencomment
 # Create states for three-to-one aspect
@@ -118,11 +119,10 @@ adjustAndAddThreeToOneVars <- function(subscriptions)
 {
   subscriptions %>%
     # transform periodend and threetoonestartdatedt to dates for use a little later
-    dplyr::mutate(periodenddt = parse_date_time(as.character(periodend), "ymd HMS")) %>%
-    dplyr::mutate(threetoonestartdatedt = parse_date_time(as.character(threetoonestartdate), "ymd")) %>%
+    dplyr::mutate(threetoonestartdate = as.Date(threetoonestartdate)) %>%
     
     # if the next subs is a threetoonesubs then the current subs codes for it, if it isn't, then it does not
-    dplyr::arrange(customerid, subscriptionid) %>%
+    dplyr::arrange(subscriptionid) %>%
     dplyr::group_by(customerid) %>%
     dplyr::mutate(isthreetoonestate = lead(isthreetoonesubs, default = NA)) %>%
     dplyr::ungroup() %>%
@@ -130,17 +130,14 @@ adjustAndAddThreeToOneVars <- function(subscriptions)
     # if there is no next subs, we instead look at the startdate for three-to-one
     # we execute orders around 10 days before subs expiry, take that into account
     dplyr::mutate(isthreetoonestate = 
-                    ifelse(is.na(isthreetoonestate),
+                    if_else(is.na(isthreetoonestate),
                            # no next subs, infer from threetoonestartdate If exists and subs ends minus 10 days falls after 
                            # threetoonestartdate, then it is in the three-to-one state
-                           ifelse(!is.na(threetoonestartdatedt) & periodenddt + days(-10) >= threetoonestartdatedt, 1, 0),
+                           if_else(!is.na(threetoonestartdate) & periodend + days(-10) >= threetoonestartdate, 1L, 0L),
                            # a next subs, don't introduce changes, use already present value
                            isthreetoonestate
                            )
-                  ) %>%
-    
-    # remove tmp variables and periodend, we are not using it anymore
-    dplyr::select(-periodend, -periodenddt, -threetoonestartdatedt)
+                  )
 }
 
 

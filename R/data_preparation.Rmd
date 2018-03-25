@@ -15,7 +15,6 @@ The output is *subscriptions.rds* file.
 ```{r setup, include=FALSE}
 source('config.R')
 source('utils.R')
-source('utils_validation.R')
 
 # sampling for dev
 # SAMPLE_DATA <- TRUE
@@ -42,9 +41,6 @@ subscriptions <- subscriptions_org %>%
   processSubscriptions() %>%
 
   joinProcessCustomers(customers, age_to_join_sitevers = 5) %>%
-  
-  # Mortencomment: engineer three-to-one month variables
-  adjustAndAddThreeToOneVars() %>%
 
   joinProcessGDP(gdp) %>%
 
