@@ -52,7 +52,7 @@ validation <- function(data, model, predict_fun = NULL){
   return(prediction_table)
 }
 
-validation_plots <- function(prediction_table){
+validation_plots <- function(prediction_table, minimal_share = 0.01){
   prediction_table %>%
     filter(siteverkey_cat2 != "ORG" & !is.na(predict_churn)) %>%
     mutate(subs_length = case_when(
@@ -75,6 +75,7 @@ validation_plots <- function(prediction_table){
         group_by(subs_length, set_type) %>%
         mutate(Real = 1 - (1- churn_rate) ^ (1/as.double(months)),
                shr = cnt/sum(cnt)) %>%
+        filter(shr >= minimal_share) %>%
         gather(key, val, c(Real, Predicted)) %>%
         ungroup() %>%
         ggplot(aes(num_previous_months_binned, val, color = key)) +
@@ -93,7 +94,9 @@ validation_plots <- function(prediction_table){
         summarise(predict_churn = mean(predict_churn),
                   real_probability = mean(churnind),
                   cnt = n()) %>% 
-        filter(cnt >=  20) %>%
+        group_by(subs_length, set_type) %>%
+        filter(cnt/sum(cnt) >= minimal_share) %>%
+        ungroup() %>%
         ggplot(aes(predict_churn, real_probability, color = set_type)) +
         geom_point() +
         geom_line() +

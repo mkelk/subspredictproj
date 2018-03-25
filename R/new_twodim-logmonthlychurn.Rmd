@@ -74,7 +74,7 @@ prediction_table <- validation(subscriptions_with_target, new_model, predict_2fc
 ```
 
 ```{r fig.height=10, fig.width=7, warning=F}
-validation_plots(prediction_table)
+validation_plots(prediction_table, minimal_share = 0.01)
 ```
 
 Try simple logistic model
@@ -98,5 +98,5 @@ prediction_table_logit <- validation(subscriptions_with_target, model_logit)
 ```
 
 ```{r fig.height=10, fig.width=7, warning=F}
-validation_plots(prediction_table_logit)
+validation_plots(prediction_table_logit, minimal_share = 0.01)
 ```
