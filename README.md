@@ -126,3 +126,22 @@ The goal was not pretty, well-structured or maintanable code, but rather to prov
 
 # Stuff to look into   
   * Understand "kink" in churn curves around 5 months of age.
+  
+  
+  
+# Things to investigate
+  * Can we make even better predictions using 3-1 in the churn prediction model?
+    * We should also use 3-1 in continuation
+  * Would it make sense to extend the training window to 6 or 9 months and having an boolean
+    factor that indicates "recency" (for instance latest three months). That would give a better chance
+	to pick up 3-1 behavior, as this has been happening in "bursts" over the last year or so.
+	How does that relate to training vs validation, if we use a longer window for training?
+  * It could be interesting to run the simple logit model with the same dimensions used in the logmonthlychurn
+    model - just to see if it is the "log of monthly churn" that works in this model or if it is simply the 
+	engineering of the structure dimension.
+  * Would adding gdp to any of the logmonthlychurn as an independent dimension
+    make the market aspects better? Using gdp could mean that
+    we do not need to lump together a lot of small markets, but can use gdp to assist the model on small markets.
+  * For lifetime calculations, we need to do something about missing 24 month churn observations. A model in which we 
+    compose a sequence of well-known 3- or 12 month churns may be our best shot. That is what I am using in the budget, 
+	but I really don't know the quality of the assumption.
