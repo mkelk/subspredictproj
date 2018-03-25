@@ -57,6 +57,8 @@ Train model
 
 ```{r}
 new_model=glm(log_month_churn ~ market_category + subscription_summary_no_market, data=churntable_no_zeros[churntable_no_zeros$set_type == 'training', ], weights = weight)
+
+write_rds(new_model, '../data/models/churn_model.rds')
 ```
 
 Model validation for training (2017-01-01 - 2017-08-01) and validation (2017-09-01 - 2018-01-01) sets:

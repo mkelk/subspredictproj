@@ -83,3 +83,29 @@ subscriptions_with_continuation %>%
 
 ```
 
+```{r}
+
+model_continuation <- list(
+  data = subscriptions_with_continuation,
+  model_lookup = subscriptions_with_continuation %>%
+    group_by(lag_months, months_fac) %>%
+    summarise(cnt = n()) %>%
+    group_by(lag_months) %>%
+    mutate(prob = cnt/sum(cnt)) %>%
+    select(-cnt) %>%
+    spread(months_fac, prob, fill = 0) %>%
+    rename(months = lag_months) %>%
+    as.data.frame() %>%
+    split(.$months) %>%
+    map(~{
+      .$months <- NULL
+      .
+    }) 
+)
+class(model_continuation) <- 'continuation'
+
+
+write_rds(model_continuation, '../data/models/continuation_model.rds')
+
+```
+
