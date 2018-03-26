@@ -8,6 +8,7 @@ Read prepared data from Jakubs prepared subscription file.
 
 ```{r reading, tidy=F}
 library(tidyverse)
+library(lubridate)
 
 subscriptions <- read_rds('data/subscriptions.rds')
 ```
@@ -207,6 +208,89 @@ tmp <- subscriptions %>%
 tmp %>% ggplot(aes(x=firstpaidmonth, y=ratio, fill=model31224)) + geom_col() + 
   ggtitle("How different 3-12-24 models have been used over time - EUR")
 ```
+
+
+# Three to one
+
+Primarily for reasons of decreasing the "charge-back rate", or in short, CB, we have been migrating 3-month users to 
+1-month subscriptions. It 1) creates more transactions (higher denominator lowers CB fraction) and 2) the 1-month automatic
+renewals cause fewer CB (lower numerator lowers CB fraction). We have done this in a mix of different markets, and for different
+user ages over the last couple of years. Below is some insight in what to expect. In the first migrations, we were prioritizing 1),
+now we are more prioritizing 2). That can be clearly seen in the plot over "At what age did we start users on 3-to-1".
+
+```{r}
+tmp <- subscriptions %>% 
+  # aggregate on customers 
+  dplyr::filter(!is.na(threetoonestartdate)) %>%
+  dplyr::group_by(customerid, threetoonestartdate) %>%
+  dplyr::summarise(numusers = n()) %>%
+  dplyr::ungroup() %>%
+  dplyr::mutate(threetoonestartdate = parse_date_time(as.character(threetoonestartdate), "ymd"))
+
+tmp %>% ggplot(aes(x=threetoonestartdate, y=numusers)) + geom_col() + 
+  ggtitle("When have we started users on 3-to-1")
+```
+```{r}
+tmp <- subscriptions %>% 
+  # aggregate on customers 
+  dplyr::filter(!is.na(threetoonestartdate)) %>%
+  dplyr::mutate(threetoonestartmonth = floor_date(parse_date_time(as.character(threetoonestartdate), "ymd"), "month")) %>%
+  dplyr::mutate(market_category = factor(market_category)) %>%
+  dplyr::group_by(customerid, threetoonestartmonth, market_category) %>%
+  dplyr::summarise(numusers = n()) %>%
+  dplyr::ungroup() 
+
+tmp %>% ggplot(aes(x=threetoonestartmonth, y=numusers, fill = market_category)) + geom_col() + 
+  ggtitle("Where have we started users on 3-to-1")
+```
+
+
+```{r}
+intervals <- c(-1, 0, 1, 2, 3, 10, 1000)
+
+tmp <- subscriptions %>% 
+  # aggregate on customers 
+  dplyr::filter(!is.na(threetoonestartdate)) %>%
+  dplyr::mutate(threetoonestartdate = parse_date_time(as.character(threetoonestartdate), "ymd")) %>%
+  dplyr::mutate(threetoonestartagemonths = interval(firstpaiddate, threetoonestartdate) %/% months(1)) %>%
+  dplyr::mutate(threetoonestartmonth = floor_date(parse_date_time(as.character(threetoonestartdate), "ymd"), "month")) %>%
+  dplyr::group_by(customerid, threetoonestartmonth, threetoonestartagemonths) %>%
+  dplyr::summarise(numusers = n()) %>%
+  dplyr::ungroup() %>%
+  dplyr::mutate(agecatatthreetoonechange = ifelse(threetoonestartagemonths == 0, 0, 
+                                ifelse(threetoonestartagemonths <= 1, 1, 
+                                       ifelse(threetoonestartagemonths <= 5, 5, 'older'))))
+
+tmp %>% ggplot(aes(x=threetoonestartmonth, y=numusers, fill = agecatatthreetoonechange)) + geom_col() + 
+  ggtitle("At what age did we start users on 3-to-1")
+```
+
+_paymentperiodchosenatstart_ is really the _current_ understanding of how we renew customers and can thus 
+change over time for a given user. If a three-month
+user changes to yearly payment schedule, _paymentperiodchosenatstart_ gets overwritten from 3 to 12 when 
+this happens. It is thus only a good proxy for the first choice of periodicity of a given user, as it normally 
+does not change a lot.
+
+But in the 3-1 in particular, it IS changed for a lot os users and therefore, particularly with the 3-1 users,
+we should exercise some caution in interpreting and using _paymentperiodchosenatstart_.
+
+
+```{r}
+tmp <- subscriptions %>% 
+  # aggregate on customers 
+  dplyr::filter(!is.na(threetoonestartdate)) %>%
+  dplyr::mutate(threetoonestartmonth = floor_date(parse_date_time(as.character(threetoonestartdate), "ymd"), "month")) %>%
+  dplyr::mutate(paymentperiodchosenatstart = factor(paymentperiodchosenatstart)) %>%
+  dplyr::group_by(threetoonestartmonth, paymentperiodchosenatstart) %>%
+  dplyr::summarise(numusers = n()) %>%
+  dplyr::ungroup() 
+
+tmp %>% ggplot(aes(x=threetoonestartmonth, y=numusers, fill = paymentperiodchosenatstart)) + geom_col() + 
+  ggtitle("Users on 3-to-1 have their paymentperiodchosenatstart rewritten \nat the time of migration")
+```
+
+
+
 
 # prices
 
