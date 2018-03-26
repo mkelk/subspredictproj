@@ -17,7 +17,7 @@ source('config.R')
 source('utils.R')
 
 # sampling for dev
-# SAMPLE_DATA <- TRUE
+#SAMPLE_DATA <- TRUE
 SAMPLE_DATA <- FALSE
 fraction_sample <- 0.01 # use this to slim data for faster experimentation
 ```
