@@ -4,169 +4,14 @@ date: "March 19, 2018"
 output: html_notebook
 ---
 
-
-For now, just live on top of the crude collection of data from Melk's first draf. 
-Expect to adapt to Jakubs core data as it matures.
-
-
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE, warning=F, message=F)
-
-library(dplyr)
-library(ggplot2)
-library(caret)
-library(DT)
-library(lubridate)
-
-source('aggregation.R')
-source('lifetimepredictor.R')
-
-# some configuration
-SLIMDATA <- T
-slimfactor <- 1.0 # use this to slim data for faster experimentation
-
-periodendcutoff <- parse_date_time('2017-01-01', 'ymd')
-beginwindow <- parse_date_time('2017-09-01', 'ymd')
-endwindow <- parse_date_time('2018-01-01', 'ymd')
-```
-
-Getting the data
+Read prepared data from Jakubs prepared subscription file.
 
 ```{r reading, tidy=F}
-if (!exists('customersorg'))
-{
-  # don't read again, we've already got it
-  customersorg <- read.table(file = 'data/CustomersV2.export.tsv', sep = '\t', header = TRUE, stringsAsFactors = F)
-  gdp <- read.table(file = 'data/gdp-simple.export.tsv', sep = '\t', header = TRUE, stringsAsFactors=F)
-  colnames(gdp)<-c('marketname', 'gdppercapita')
-  subsorg <- read.table(file = 'data/SubscriptionsV2.export.tsv', sep = '\t', header = TRUE,
-                     stringsAsFactors=F)
-}
+library(tidyverse)
+
+subscriptions <- read_rds('data/subscriptions.rds')
 ```
 
-Optionally slimming the data for faster development
-
-```{r slimming, tidy=F}
-if (SLIMDATA)
-{
-  set.seed(1)
-  index <- caret::createDataPartition(customersorg$customerid, p = slimfactor, list = FALSE, times = 1)
-  customers <- customersorg[index,]
-  custids <- customers %>% dplyr::select(customerid)
-  subs <- subsorg %>% dplyr::inner_join(custids, by = 'customerid')
-} else {
-  customers <- customersorg
-  subs <- subsorg
-}
-```
-
-Fixing the dates
-```{r dates, tidy=F}
-subs$periodend<-as.Date(subs$periodend)
-subs$startmonth<-as.Date(subs$startmonth)
-subs$endmonth<-as.Date(subs$endmonth)
-subs$startmonth<-ymd(subs$startmonth)
-subs$endmonth<-ymd(subs$endmonth)
-# Create the months variable
-subs$months=(year(subs$endmonth)-year(subs$startmonth))*12+
-  (month(subs$endmonth)-month(subs$startmonth))
-```
-
-Filtering the data
-leaving only those with subscription period 1,3,12,24
-
-```{r filtering, tidy=F}
-x1 <- unique(subs$customerid[!(subs$months %in% c(1,3,12,24))])
-# period starts after march 2018
-x2 <- unique(subs$customerid[subs$startmonth>'2018-03-01']) 
-x3<-unique(c(x1,x2))
-rm(x1);rm(x2)
-# Subsetting the data
-subs1<- subs[!(subs$customerid%in% x3),]
-```
-
-Removing no need variables and preparing a bit
-
-```{r, tidy=F}
-# Removing variables
-subs1$periodstart<-NULL
-subs1$periodend<-NULL
-subs1$billingcurrency<-factor(subs1$billingcurrency)
-```
-
-Data preperation
-Here we create 3 new variables:
-lag: The previous state, is 0 if is new customer
-months_total: How many months do we have of total subscription
-times: How many times he bought subscription
-```{r dplyr}
-## Sorting by ID and date
-subs1$One<-1 ## We need this for later
-subs1$months1<-subs1$months
-subs1$months<-as.character(subs1$months)
-#subs2<-subs1[1:25000,]
-subs1<-subs1 %>%
-  
-  arrange(customerid, startmonth) %>%
-  group_by(customerid) %>%
-  # Take the last row for each customerid, duplicate it
-  filter(row_number()==n()) %>%
-  #mutate(months = as.character(months)) %>%
-  mutate(months = ifelse(endmonth<'2018-03-01', 'churn', 'active')) %>%
-  #We need this for sorting later
-  mutate(subscriptionid=subscriptionid+0.001)%>%
-  bind_rows(subs1)%>%
-  arrange(customerid, subscriptionid) %>%
-  # Total months and number of subscriptions before the given state/event
-  mutate(months_total=lag(cumsum(months1), n=1, default=0), times = dplyr::lag(cumsum(One), n=1, default=0)) %>%
-  # previous subs type, 0, if this if first
-  mutate(lag = dplyr::lag(months, n=1, default='0'))
-
-subs1 <- subs1 %>%
-  mutate(lead = dplyr::lead(months, n=1))
-
-subs1$months1<-NULL
-subs1$One<-NULL 
-
-# get rid of dplyr dataframe structure
-subs1<-as.data.frame(subs1)
-# take out actives
-subs1<-subs1[subs1$months !='active',]
-```
-
-Data preparation and joining with customerid and gdp
-
-```{r joining}
-subs1$months<-factor(subs1$months, levels=c('1','3','12', '24', 'churn'), 
-                     labels=c('1','3','12', '24',  'churn'))  
-subs1$lag<-factor(subs1$lag, levels = c('0','1','3','12', '24'), 
-                  labels = c(c('0','1','3','12', '24')))
-subs1$lead<-factor(subs1$lead, levels = c('churn','1','3','12', '24'), 
-                  labels = c(c('churn','1','3','12', '24')))
-
-# joining with customers
-subs2<-plyr::join(subs1, customers, by='customerid', type='left', match='all')
-# Joining with gdp data
-subs2<-plyr::join(subs2, gdp, by='marketname', type='left', match='all')
-```
-
-Changing the types of data to categorical when needed and scaling the numeric variables
-
-```{r var_types}
-subs2$isfreemium<-factor(subs2$isfreemium, levels=c(0,1), labels=c('No', 'Yes'))
-subs2$segment<-factor(subs2$segment)
-subs2$productversion<-factor(subs2$productversion)
-subs2$isquickpurchase<-factor(subs2$isquickpurchase, levels=c(0,1), labels=c('No', 'Yes'))
-subs2$firstdevice<-factor(subs2$firstdevice)
-subs2$marketname <- factor(subs2$marketname)
-subs2$model31224 <- factor(subs2$model31224)
-subs2$channelcat <- factor(subs2$channelcat)
-subs2$siteverkey <- factor(subs2$siteverkey)
-subs2$currency <- factor(subs2$currency)
-## Scale gdp data
-gdpsc<-as.vector(scale(subs2$gdppercapita, center=T, scale=T))
-subs2$gdppercapita<-gdpsc
-```
 
 # Premium vs. Freemium
 
@@ -179,12 +24,12 @@ After: Users get a continued free subs, and can choose to convert. If they conve
 will be a 1 month subs purchased very cheaply, including a domain. Then we renew them on a 3 month plan (typically).
 
 ```{r}
-tmp <- subs2 %>% 
+tmp <- subscriptions %>% 
   # Only firs subs
-  dplyr::filter(times == 0) %>%
-  dplyr::mutate(firstpaidmonth = parse_date_time(firstpaidmonth, "ymd")) %>%
+  dplyr::filter(num_previous_subs == 0) %>%
+  dplyr::mutate(isfreemium = factor(isfreemium)) %>%
   dplyr::group_by(firstpaidmonth, isfreemium) %>%
-  dplyr::summarise(numsubs = length(customerid)) %>%
+  dplyr::summarise(numsubs = n()) %>%
   dplyr::ungroup() 
 
 tmp %>% ggplot(aes(x=firstpaidmonth, y=numsubs, color=isfreemium)) + geom_point() + geom_line() + 
@@ -194,31 +39,29 @@ tmp %>% ggplot(aes(x=firstpaidmonth, y=numsubs, color=isfreemium)) + geom_point(
 We still have a little Premium left on the old "Sitevers" (.dk, .se, .fr, etc.) where new "organic"" users still come in to the old sites because they know of them. siteverkey = 'US' corresponds to SimpleSite.com and it is on that one that we do Freemium.
 
 ```{r}
-tmp <- subs2 %>% 
+tmp <- subscriptions %>% 
   # Only firs subs
-  dplyr::filter(times == 0) %>%
+  dplyr::filter(num_previous_subs == 0) %>%
   # Only premium
-  dplyr::filter(isfreemium == 'No') %>%
-  dplyr::mutate(firstpaidmonth = parse_date_time(firstpaidmonth, "ymd")) %>%
+  dplyr::filter(isfreemium == 0) %>%
   # is old sitever
   dplyr::mutate(isoldsitever = ifelse(siteverkey == 'US', F, T)) %>%
   dplyr::group_by(firstpaidmonth, isoldsitever) %>%
-  dplyr::summarise(numsubs = length(customerid)) %>%
+  dplyr::summarise(numsubs = n()) %>%
   dplyr::ungroup() 
 
 tmp %>% ggplot(aes(x=firstpaidmonth, y=numsubs, color=isoldsitever)) + geom_point() + geom_line() + 
   ggtitle("Only Premium in old sitevers now")
 
-tmp <- subs2 %>% 
-  # Only firs subs
-  dplyr::filter(times == 0) %>%
+tmp <- subscriptions %>% 
+  # Only first subs
+  dplyr::filter(num_previous_subs == 0) %>%
   # Only premium
-  dplyr::filter(isfreemium == 'Yes') %>%
-  dplyr::mutate(firstpaidmonth = parse_date_time(firstpaidmonth, "ymd")) %>%
+  dplyr::filter(isfreemium == 1) %>%
   # is old sitever
   dplyr::mutate(isoldsitever = ifelse(siteverkey == 'US', F, T)) %>%
   dplyr::group_by(firstpaidmonth, isoldsitever) %>%
-  dplyr::summarise(numsubs = length(customerid)) %>%
+  dplyr::summarise(numsubs = n()) %>%
   dplyr::ungroup() 
 
 tmp %>% ggplot(aes(x=firstpaidmonth, y=numsubs, color=isoldsitever)) + geom_point() + geom_line() + 
@@ -229,14 +72,14 @@ period and how we have pitched those options. At present, it is mostly 3 month p
 start with.
 
 ```{r}
-tmp <- subs2 %>% 
+tmp <- subscriptions %>% 
   # Only first subs
-  dplyr::filter(times == 0) %>%
+  dplyr::filter(num_previous_subs == 0) %>%
   # Only premium
-  dplyr::filter(isfreemium == 'No') %>%
-  dplyr::mutate(firstpaidmonth = parse_date_time(firstpaidmonth, "ymd")) %>%
+  dplyr::filter(isfreemium == 0) %>%
+  dplyr::mutate(months = factor(months)) %>%
   dplyr::group_by(firstpaidmonth, months) %>%
-  dplyr::summarise(numsubs = length(customerid)) %>%
+  dplyr::summarise(numsubs = n()) %>%
   dplyr::group_by(firstpaidmonth) %>%
   dplyr::mutate(ratio = numsubs / sum(numsubs)) %>%
   dplyr::ungroup()
@@ -251,14 +94,14 @@ for a continued subscription of a given periodlength. In some periods, it has be
 Starting late 2015, there has been considerable experimentation on this, very often specialized to specific markets, currencies, etc.
 
 ```{r}
-tmp <- subs2 %>% 
+tmp <- subscriptions %>% 
   # Look at subs following first 1 month subs
-  dplyr::filter(times == 1 & months != 'churn') %>%
+  dplyr::filter(num_previous_subs == 1 & status != 'churn') %>%
   # Only freemium
-  dplyr::filter(isfreemium == 'Yes') %>%
-  dplyr::mutate(firstpaidmonth = parse_date_time(firstpaidmonth, "ymd")) %>%
+  dplyr::filter(isfreemium == 1) %>%
+  dplyr::mutate(months = factor(months)) %>%
   dplyr::group_by(firstpaidmonth, months) %>%
-  dplyr::summarise(numsubs = length(customerid)) %>%
+  dplyr::summarise(numsubs = n()) %>%
   dplyr::group_by(firstpaidmonth) %>%
   dplyr::mutate(ratio = numsubs / sum(numsubs)) %>%
   dplyr::ungroup()
@@ -273,14 +116,15 @@ it is rare that there is this change and most often periodlength = paymentperiod
 
 
 ```{r}
-tmp <- subs2 %>% 
+tmp <- subscriptions %>% 
   # Look at subs following first 1 month subs
-  dplyr::filter(times == 1 & months != 'churn') %>%
+  dplyr::filter(num_previous_subs == 1 & status != 'churn') %>%
   # Only freemium
-  dplyr::filter(isfreemium == 'Yes') %>%
+  dplyr::filter(isfreemium == 1) %>%
   dplyr::mutate(paymentperiodchosenatstart = factor(paymentperiodchosenatstart)) %>%
+  dplyr::mutate(months = factor(months)) %>%
   dplyr::group_by(months, paymentperiodchosenatstart) %>%
-  dplyr::summarise(numsubs = length(customerid)) %>%
+  dplyr::summarise(numsubs = n()) %>%
   dplyr::group_by(paymentperiodchosenatstart) %>%
   dplyr::mutate(ratio = numsubs / sum(numsubs)) %>%
   dplyr::ungroup()
@@ -293,13 +137,14 @@ A bunch of experiments and business models over time has explored how to approac
 They give quite different distributions.
 
 ```{r}
-tmp <- subs2 %>% 
+tmp <- subscriptions %>% 
   # Look at subs following first 1 month subs
-  dplyr::filter(times == 1 & months != 'churn') %>%
+  dplyr::filter(num_previous_subs == 1 & status != 'churn') %>%
   # Only freemium
-  dplyr::filter(isfreemium == 'Yes') %>%
+  dplyr::filter(isfreemium == 1) %>%
+  dplyr::mutate(months = factor(months)) %>%
   dplyr::group_by(months, model31224) %>%
-  dplyr::summarise(numsubs = length(customerid)) %>%
+  dplyr::summarise(numsubs = n()) %>%
   dplyr::group_by(model31224) %>%
   dplyr::mutate(ratio = numsubs / sum(numsubs)) %>%
   dplyr::ungroup()
@@ -312,14 +157,13 @@ tmp %>% ggplot(aes(x=model31224, y=ratio, fill=months)) + geom_col() +
 This illustrates how the different business models have been in play over time.
 
 ```{r}
-tmp <- subs2 %>% 
+tmp <- subscriptions %>% 
   # Look at subs following first 1 month subs
-  dplyr::filter(times == 1 & months != 'churn') %>%
+  dplyr::filter(num_previous_subs == 1 & status != 'churn') %>%
   # Only freemium
-  dplyr::filter(isfreemium == 'Yes') %>%
-  dplyr::mutate(firstpaidmonth = parse_date_time(firstpaidmonth, "ymd")) %>%
+  dplyr::filter(isfreemium == 1) %>%
   dplyr::group_by(firstpaidmonth, model31224) %>%
-  dplyr::summarise(numsubs = length(customerid)) %>%
+  dplyr::summarise(numsubs = n()) %>%
   dplyr::group_by(firstpaidmonth) %>%
   dplyr::mutate(ratio = numsubs / sum(numsubs)) %>%
   dplyr::ungroup()
@@ -331,14 +175,13 @@ tmp %>% ggplot(aes(x=firstpaidmonth, y=ratio, fill=model31224)) + geom_col() +
 Here is it just for USD - now predominantly pre-changes i.e. almost only 3m subses.
 
 ```{r}
-tmp <- subs2 %>% 
+tmp <- subscriptions %>% 
   # Look at subs following first 1 month subs
-  dplyr::filter(times == 1 & months != 'churn' & currency == "USD") %>%
+  dplyr::filter(num_previous_subs == 1 & status != 'churn' & currency == "USD") %>%
   # Only freemium
-  dplyr::filter(isfreemium == 'Yes') %>%
-  dplyr::mutate(firstpaidmonth = parse_date_time(firstpaidmonth, "ymd")) %>%
+  dplyr::filter(isfreemium == 1) %>%
   dplyr::group_by(firstpaidmonth, model31224) %>%
-  dplyr::summarise(numsubs = length(customerid)) %>%
+  dplyr::summarise(numsubs = n()) %>%
   dplyr::group_by(firstpaidmonth) %>%
   dplyr::mutate(ratio = numsubs / sum(numsubs)) %>%
   dplyr::ungroup()
@@ -350,14 +193,13 @@ tmp %>% ggplot(aes(x=firstpaidmonth, y=ratio, fill=model31224)) + geom_col() +
 Here is it just for EUR - now predominantly 3-12-24.
 
 ```{r}
-tmp <- subs2 %>% 
+tmp <- subscriptions %>% 
   # Look at subs following first 1 month subs
-  dplyr::filter(times == 1 & months != 'churn' & currency == "EUR") %>%
+  dplyr::filter(num_previous_subs == 1 & status != 'churn' & currency == "EUR") %>%
   # Only freemium
-  dplyr::filter(isfreemium == 'Yes') %>%
-  dplyr::mutate(firstpaidmonth = parse_date_time(firstpaidmonth, "ymd")) %>%
+  dplyr::filter(isfreemium == 1) %>%
   dplyr::group_by(firstpaidmonth, model31224) %>%
-  dplyr::summarise(numsubs = length(customerid)) %>%
+  dplyr::summarise(numsubs = n()) %>%
   dplyr::group_by(firstpaidmonth) %>%
   dplyr::mutate(ratio = numsubs / sum(numsubs)) %>%
   dplyr::ungroup()
