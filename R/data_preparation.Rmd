@@ -44,9 +44,11 @@ subscriptions <- subscriptions_org %>%
 
   joinProcessGDP(gdp) %>%
 
-  concatCategrories() %>%
+  concatCategrories() 
 
-  mutate_if(is.character, funs(as.factor))
+# Removed factors for stability
+# %>%
+#   mutate_if(is.character, funs(as.factor))
   
 write_rds(subscriptions, '../data/subscriptions.rds', compress = 'xz')
 
