@@ -58,6 +58,7 @@ Train model
 ```{r}
 new_model=glm(log_month_churn ~ market_category + subscription_summary_no_market, data=churntable_no_zeros[churntable_no_zeros$set_type == 'training', ], weights = weight)
 
+class(new_model) <- c('log_month_churn', class(new_model))
 write_rds(new_model, '../data/models/churn_model.rds')
 ```
 
