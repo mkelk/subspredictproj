@@ -24,29 +24,49 @@ predictContinuation <- function(customer, continuation_model, churn_model, defau
   probabilities %>%
     imap(~{
       new_months <- as.numeric(.y)
-      tmp <- list(customer = mutateCustomer(customer, new_months, revenue=T, full=F))
+      
+      tmp <- list(probability = .x)
+      tmp$customer <- mutateCustomer(customer, new_months, revenue=T, full=F)
       tmp$churn_probability <- predictChurn(tmp$customer, churn_model)
-      if(tmp$customer$simulation_step < max_depth & tmp$customer$simulation_month < max_months) {
-        tmp$continuation <- predictContinuation(tmp$customer, continuation_model, max_depth = max_depth, max_months = max_months)
+      
+      if(0 < max_depth & 0 < max_months & tmp$churn_probability < 1) {
+        tmp$continuation <- predictContinuation(tmp$customer, continuation_model, max_depth = max_depth - 1, max_months = max_months - new_months)
       }
       
-      return(list(probability = .x, leaf = tmp))
+      return(tmp)
     })
 }
 
+
+generateLifetimeTree <- function(customer, churn_model, continuation_model, max_depth, max_months) {
+  customer <- as.list(customer)
+  
+  list(
+    probability = 1,
+    customer = customer,
+    churn_probability = predictChurn(customer, churn_model),
+    
+    continuation = predictContinuation(customer, continuation_model, churn_model, max_depth = max_depth, max_months = max_months)
+  )
+}
+
 # Calculate CLV for customer 
-sumCLV <-  function(customer_simulation, default_val = 0){
+expectedValue <-  function(customer_simulation, type = 'revenue', default_val = 0){
+  if(!type %in% c('revenue', 'lifetime')) stop('Wrong type argument! Possible values are revenue lifetime')
+  if(type == 'revenue') value <- customer_simulation$customer$revenuecurr
+  if(type == 'lifetime') value <- 1
+  
   if(!is.null(customer_simulation$continuation)) {
-    clv <- customer_simulation$continuation %>%
+    tail_value <- customer_simulation$continuation %>%
       map_dbl(~{
-        .$probability * sumCLV(.$leaf, default_val = default_val)
+        .$probability * expectedValue(., default_val = default_val, type = type)
       }) %>%
       reduce(`+`)
   } else {
-    clv <- default_val
+    tail_value <- default_val
   }
   
-  return(customer_simulation$customer$revenuecurr + (clv * (1 - customer_simulation$churn_probability)))
+  return(value + (tail_value * (1 - customer_simulation$churn_probability)))
 }
 
 
