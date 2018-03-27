@@ -14,5 +14,7 @@ prediction_object = list(
   customer = test_customer,
   churn_probability = predictChurn(test_customer, churn_model),
   
-  continuation = predictContinuation(test_customer, continuation_model, churn_model, max_depth = 10, max_months = 24)
+  continuation = predictContinuation(test_customer, continuation_model, churn_model, max_depth = 1, max_months = 24)
 )
+
+sumCLV(prediction_object)

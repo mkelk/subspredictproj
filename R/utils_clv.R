@@ -24,14 +24,29 @@ predictContinuation <- function(customer, continuation_model, churn_model, defau
   probabilities %>%
     imap(~{
       new_months <- as.numeric(.y)
-      tmp <- list(customer = mutateCustomer(customer, new_months, full=F))
+      tmp <- list(customer = mutateCustomer(customer, new_months, revenue=T, full=F))
       tmp$churn_probability <- predictChurn(tmp$customer, churn_model)
-      if(tmp$customer$simulation_step <= max_depth & tmp$customer$simulation_month <= max_months) {
+      if(tmp$customer$simulation_step < max_depth & tmp$customer$simulation_month < max_months) {
         tmp$continuation <- predictContinuation(tmp$customer, continuation_model, max_depth = max_depth, max_months = max_months)
       }
       
       return(list(probability = .x, leaf = tmp))
     })
+}
+
+# Calculate CLV for customer 
+sumCLV <-  function(customer_simulation, default_val = 0){
+  if(!is.null(customer_simulation$continuation)) {
+    clv <- customer_simulation$continuation %>%
+      map_dbl(~{
+        .$probability * sumCLV(.$leaf, default_val = default_val)
+      }) %>%
+      reduce(`+`)
+  } else {
+    clv <- default_val
+  }
+  
+  return(customer_simulation$customer$revenuecurr + (clv * (1 - customer_simulation$churn_probability)))
 }
 
 
@@ -50,7 +65,8 @@ mutateCustomer <- function(
   customer, 
   new_months, 
   num_previous_months_breaks = c(0, 1, 2, 3, 5, 8, 11, 14, 26, 38), 
-  age_to_join_sitevers = 5, 
+  age_to_join_sitevers = 5,
+  revenue = TRUE,
   full = TRUE
 ) {
   customer$simulation_step <- customer$simulation_step + 1
@@ -72,15 +88,17 @@ mutateCustomer <- function(
                                                      customer$months, 
                                                      customer$chosen_subs_length)
   
+  if(revenue){
+    plus_vat <- customer$revenuecurrinclvat / customer$revenuecurr
+    customer$revenuecurr <- revenueCurr(new_months)
+    customer$revenuecurrinclvat <- customer$revenuecurr * plus_vat
+  }
+  
   if(full){
     customer$periodend <- customer$periodend %m+% months(new_months)
     customer$startmonth <- customer$startmonth %m+% months(new_months)
     customer$endmonth <- customer$endmonth %m+% months(new_months)
     customer$num_previous_subs <- customer$num_previous_subs + 1
-    
-    plus_vat <- customer$revenuecurrinclvat / customer$revenuecurr
-    customer$revenuecurr <- revenueCurr(new_months)
-    customer$revenuecurrinclvat <- customer$revenuecurr * plus_vat
     
     customer$subscription_summary <- sprintf("mc-%s_ssc-%s_ac-%d_m-%d_ccsl-%s", 
                                     customer$market_category,
