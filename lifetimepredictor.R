@@ -1,21 +1,28 @@
 library(data.table)
 
-#marketcat = "US"
-#siteverkey <- "SS"
-#model <- new_model  
+# marketname = "US"
+# siteverkey <- "SS"
+# model <- new_model
+
+simplepredictor3m(model, marketname, siteverkey)
 
 
 simplepredictor3m <- function(model, marketname, siteverkey)
 {
   # begin with a 1m subs at month 0
   mysubs <- data.table(marketname = marketname, paymentperiodchosenatstart = '3', months = 1, months_total = 0, siteverkey = siteverkey )
-  mysubs2 <- mysubs %>% addChurnCatsEtc()
+  mysubs2 <- mysubs %>% 
+    addChurnCatsEtc() %>%
+    rename(market_category = marketcat) %>%
+    mutate(subscription_summary = sprintf("mc-%s_ssc-%s_ac-%d_m-%d_ccsl-%s", market_category, siteverkeycatchurn, ageatstartcatchurn, months, custchosensubslengthcatchurn),
+           subscription_summary_no_market = sprintf("ssc-%s_ac-%d_m-%d_ccsl-%s", siteverkeycatchurn, ageatstartcatchurn, months, custchosensubslengthcatchurn)) %>% 
+    mutate_if(is.factor, as.character)
   
   sumlife <- 0.0
   numiterations <- 0
 
   # get the logmonthchurn for the first month
-  logmonthchurninit <- predict(model, newdata = mysubs2, type="response")
+  logmonthchurninit <- predict.glm(model, newdata = mysubs2, type="response")
   churnonemonth <- exp(logmonthchurninit)
   churnfull <- 1-(1-churnonemonth)^1
   continuedfractionfromhere <- 1 - churnfull
@@ -23,7 +30,11 @@ simplepredictor3m <- function(model, marketname, siteverkey)
   nextsubs <- mysubs2 %>%
     dplyr::mutate(months = 3, months_total = months_total + 1) %>%
     dplyr::select(marketname, months, paymentperiodchosenatstart, months_total, siteverkey) %>%
-    addChurnCatsEtc()
+    addChurnCatsEtc() %>%
+    rename(market_category = marketcat) %>%
+    mutate(subscription_summary = sprintf("mc-%s_ssc-%s_ac-%d_m-%d_ccsl-%s", market_category, siteverkeycatchurn, ageatstartcatchurn, months, custchosensubslengthcatchurn),
+           subscription_summary_no_market = sprintf("ssc-%s_ac-%d_m-%d_ccsl-%s", siteverkeycatchurn, ageatstartcatchurn, months, custchosensubslengthcatchurn)) %>% 
+    mutate_if(is.factor, as.character)
   
   sumlife <- 1 + simpleprop3msumlife(model, nextsubs, numiterations + 1, remainingatnext)
   
@@ -38,7 +49,7 @@ simpleprop3msumlife <- function(model, mysubs, numiterations, remaininghere)
   if(remaininghere >= 0.001)
   {
     # get the logmonthchurn for a three month continuation
-    logmonthchurninit <- predict(model, newdata = mysubs, type="response")
+    logmonthchurninit <- predict.glm(model, newdata = mysubs, type="response")
     churnonemonth <- exp(logmonthchurninit)
     churnfull <- 1-(1-churnonemonth)^3
     continuedfractionfromhere <- 1 - churnfull
@@ -51,12 +62,17 @@ simpleprop3msumlife <- function(model, mysubs, numiterations, remaininghere)
     nextsubs <- mysubs %>%
       dplyr::mutate(months_total = months_total + 3) %>%
       dplyr::select(marketname, months, paymentperiodchosenatstart, months_total, siteverkey) %>%
-      addChurnCatsEtc()
+      addChurnCatsEtc() %>%
+      rename(market_category = marketcat) %>%
+      mutate(subscription_summary = sprintf("mc-%s_ssc-%s_ac-%d_m-%d_ccsl-%s", market_category, siteverkeycatchurn, ageatstartcatchurn, months, custchosensubslengthcatchurn),
+             subscription_summary_no_market = sprintf("ssc-%s_ac-%d_m-%d_ccsl-%s", siteverkeycatchurn, ageatstartcatchurn, months, custchosensubslengthcatchurn)) %>% 
+      mutate_if(is.factor, as.character)
+    
 
     thissubscontribution <- remaininghere * 3
     #print(paste("thissubscontribution:", thissubscontribution))
     
-    sumlife <- thissubscontribution * 3 + simpleprop3msumlife(model, nextsubs, numiterations + 1, remainingatnext)
+    sumlife <- thissubscontribution + simpleprop3msumlife(model, nextsubs, numiterations + 1, remainingatnext)
   } else {
     sumlife <- 0
   }
