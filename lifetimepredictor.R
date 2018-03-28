@@ -4,7 +4,7 @@ library(data.table)
 # siteverkey <- "SS"
 # model <- new_model
 
-simplepredictor3m(model, 'US', 'US')
+# simplepredictor3m(model, 'US', 'US')
 
 
 simplepredictor3m <- function(model, marketname, siteverkey)
@@ -38,7 +38,8 @@ simplepredictor3m <- function(model, marketname, siteverkey)
   
   sumlife <- 1 + simpleprop3msumlife(model, nextsubs, numiterations + 1, remainingatnext)
   
-  print(paste(marketname, sumlife / 12))
+  # print(paste(marketname, sumlife / 12))
+  sumlife / 12
 }
 
 simpleprop3msumlife <- function(model, mysubs, numiterations, remaininghere)
