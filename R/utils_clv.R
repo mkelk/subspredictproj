@@ -18,43 +18,72 @@ predictChurn <- function(customer, model, default_prob = 1){
 }
 
 # Continuation prediction
-predictContinuation <- function(customer, continuation_model, churn_model, default_length = 1, max_depth = 10, max_months = 36){
-  probabilities <- tryCatch(predict(continuation_model, newdata = customer), error = function(e) {tmp <- data.frame(1); colnames(tmp) <- default_length})
+predictContinuation <- function(customer, continuation_model, churn_model, min_branch_probability, max_depth, max_months, default_length = 1, default_prob = 1, revenue = T){
+  probabilities <- tryCatch(predict(continuation_model, newdata = customer), error = function(e) {tmp <- data.frame(1); colnames(tmp) <- default_length; return(tmp)})
   
   probabilities %>%
     imap(~{
       new_months <- as.numeric(.y)
       
-      tmp <- list(probability = .x)
-      tmp$customer <- mutateCustomer(customer, new_months, revenue=T, full=F)
-      tmp$churn_probability <- predictChurn(tmp$customer, churn_model)
+      clv_tree <- list(
+        probability = .x,
+        customer = mutateCustomer(customer, new_months, revenue=revenue, full=F)
+      )
+      clv_tree$churn_probability <- predictChurn(clv_tree$customer, churn_model, default_prob = default_prob)[[1]]
       
-      if(0 < max_depth & 0 < max_months & tmp$churn_probability < 1) {
-        tmp$continuation <- predictContinuation(tmp$customer, continuation_model, max_depth = max_depth - 1, max_months = max_months - new_months)
+      if(1 < max_depth & 
+         0 < max_months - clv_tree$customer$months & 
+         min_branch_probability/(clv_tree$probability * (1-clv_tree$churn_probability)) <= 1 ) {
+        clv_tree$continuation <- predictContinuation(
+          clv_tree$customer, 
+          continuation_model = continuation_model, 
+          churn_model = churn_model,
+          min_branch_probability = min_branch_probability/(clv_tree$probability * (1-clv_tree$churn_probability)),
+          max_depth = max_depth - 1, 
+          max_months = max_months - clv_tree$customer$months,
+          default_length = default_length,
+          default_prob = default_prob,
+          revenue=revenue)
       }
       
-      return(tmp)
+      return(clv_tree)
     })
 }
 
 
-generateLifetimeTree <- function(customer, churn_model, continuation_model, max_depth, max_months) {
+generateLifetimeTree <- function(customer, churn_model, continuation_model, min_branch_probability = 0.001, max_depth = Inf, max_months = Inf, default_length = 1, default_prob = 1, revenue = TRUE) {
   customer <- as.list(customer)
   
-  list(
+  clv_tree <- list(
     probability = 1,
     customer = customer,
-    churn_probability = predictChurn(customer, churn_model),
-    
-    continuation = predictContinuation(customer, continuation_model, churn_model, max_depth = max_depth, max_months = max_months)
+    churn_probability = predictChurn(customer, churn_model,  default_prob = default_prob)[[1]]
   )
+  if(1 < max_depth & 
+     0 < max_months - clv_tree$customer$months & 
+     min_branch_probability/(clv_tree$probability * (1-clv_tree$churn_probability)) <= 1 ) {
+    
+    clv_tree$continuation = predictContinuation(
+      clv_tree$customer, 
+      continuation_model = continuation_model, 
+      churn_model = churn_model,
+      min_branch_probability = min_branch_probability/(clv_tree$probability * (1-clv_tree$churn_probability)),
+      max_depth = max_depth - 1, 
+      max_months = max_months - clv_tree$customer$months,
+      default_length = default_length,
+      default_prob = default_prob,
+      revenue=revenue)
+  }
+  
+  return(clv_tree)
 }
 
 # Calculate CLV for customer 
 expectedValue <-  function(customer_simulation, type = 'revenue', default_val = 0){
-  if(!type %in% c('revenue', 'lifetime')) stop('Wrong type argument! Possible values are revenue lifetime')
+  if(!type %in% c('revenue', 'lifetime', 'subs')) stop('Wrong type argument! Possible values are revenue lifetime')
   if(type == 'revenue') value <- customer_simulation$customer$revenuecurr
-  if(type == 'lifetime') value <- 1
+  if(type == 'lifetime') value <- customer_simulation$customer$months
+  if(type == 'subs') value <- 1
   
   if(!is.null(customer_simulation$continuation)) {
     tail_value <- customer_simulation$continuation %>%
@@ -71,15 +100,46 @@ expectedValue <-  function(customer_simulation, type = 'revenue', default_val = 
 
 
 # Customer operations
-initializeCustomer <- function(customer){
-  customer %>%
-    mutate(simulation_step = 0,
-           simulation_month = 0) %>%
-    as.data.frame()
+revenueCurr <- function(months) months * 10
+
+initializeCustomer <- function(
+  marketname = 'US', 
+  paymentperiodchosenatstart = 3, 
+  months = 1, 
+  num_previous_months = 0, 
+  siteverkey = 'US',
+  num_previous_months_breaks = c(0, 1, 2, 3, 5, 8, 11, 14, 26, 38), 
+  age_to_join_sitevers = 5
+) {
   
+  customer <- list(
+    marketname = marketname,  
+    paymentperiodchosenatstart = paymentperiodchosenatstart, 
+    months = months,
+    num_previous_months = num_previous_months, 
+    siteverkey = siteverkey
+  )
+  
+  customer$market_category = budgetMarket(customer$marketname)
+  customer$num_previous_months_binned <- as.numeric(as.character(cut(customer$num_previous_months, 
+                                                                     breaks = c(-Inf, num_previous_months_breaks, Inf), 
+                                                                     labels = c(num_previous_months_breaks, max(num_previous_months_breaks) + 1))))
+  customer$siteverkey_cat = ifelse(customer$siteverkey == "US", "SS", "ORG")
+  customer$siteverkey_cat2 <- if_else(customer$num_previous_months_binned <= age_to_join_sitevers, as.character(customer$siteverkey_cat), 'MUT')
+  customer$chosen_subs_length <- ifelse((customer$siteverkey_cat == "SS" & customer$num_previous_months == 0) |
+                                          (customer$siteverkey_cat != "SS" & customer$num_previous_months == 1), 
+                                        as.character(customer$paymentperiodchosenatstart),
+                                        'gen')
+  
+  customer$subscription_summary_no_market <- sprintf("ssc-%s_ac-%d_m-%d_ccsl-%s", 
+                                                     customer$siteverkey_cat2, 
+                                                     customer$num_previous_months_binned, 
+                                                     customer$months, 
+                                                     customer$chosen_subs_length)
+  
+  return(customer)
 }
 
-revenueCurr <- function(months) months * 10
 
 mutateCustomer <- function(
   customer, 
@@ -89,15 +149,13 @@ mutateCustomer <- function(
   revenue = TRUE,
   full = TRUE
 ) {
-  customer$simulation_step <- customer$simulation_step + 1
-  customer$simulation_month <- customer$simulation_month + new_months
-  
   customer$num_previous_months <- customer$num_previous_months + customer$months
   customer$num_previous_months_binned <- as.numeric(as.character(cut(customer$num_previous_months, 
                                                                      breaks = c(-Inf, num_previous_months_breaks, Inf), 
                                                                      labels = c(num_previous_months_breaks, max(num_previous_months_breaks) + 1))))
   customer$siteverkey_cat2 <- if_else(customer$num_previous_months_binned <= age_to_join_sitevers, as.character(customer$siteverkey_cat), 'MUT')
-  customer$chosen_subs_length <- ifelse((customer$siteverkey_cat != "SS" & customer$num_previous_months == 1), 
+  customer$chosen_subs_length <- ifelse((customer$siteverkey_cat == "SS" & customer$num_previous_months == 0) |
+                                          (customer$siteverkey_cat != "SS" & customer$num_previous_months == 1), 
                                         as.character(customer$paymentperiodchosenatstart),
                                         'gen')
   customer$months <- new_months
