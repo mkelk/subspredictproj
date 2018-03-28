@@ -18,9 +18,44 @@ predictChurn <- function(customer, model, default_prob = 1){
 }
 
 # Continuation prediction
-predictContinuation <- function(customer, continuation_model, churn_model, min_branch_probability, max_depth, max_months, default_length = 1, default_prob = 1, revenue = T){
-  probabilities <- tryCatch(predict(continuation_model, newdata = customer), error = function(e) {tmp <- data.frame(1); colnames(tmp) <- default_length; return(tmp)})
+predictContinuation <- function(customer, model, default_length = 1){
+  if(customer$num_previous_months == 0) {tmp <- data.frame(1); colnames(tmp) <- customer$paymentperiodchosenatstart; return(tmp)}
   
+  tryCatch(predict(model, newdata = customer), 
+           error = function(e) {tmp <- data.frame(1); colnames(tmp) <- default_length; return(tmp)})
+}
+  
+# Recurrent life-tree generation
+generateLifeTree <- function(customer, continuation_model, churn_model, min_branch_probability = 0.001, max_depth = Inf, max_months = Inf, default_length = 1, default_prob = 1, revenue = TRUE) {
+  customer <- as.list(customer)
+  
+  clv_tree <- list(
+    probability = 1,
+    customer = customer,
+    churn_probability = predictChurn(customer, churn_model,  default_prob = default_prob)[[1]]
+  )
+  if(1 < max_depth & 
+     0 < max_months - clv_tree$customer$months & 
+     min_branch_probability/(clv_tree$probability * (1-clv_tree$churn_probability)) <= 1 ) {
+    
+    clv_tree$continuation = generateLifeTree.recurrence(
+      clv_tree$customer, 
+      continuation_model = continuation_model, 
+      churn_model = churn_model,
+      min_branch_probability = min_branch_probability/(clv_tree$probability * (1-clv_tree$churn_probability)),
+      max_depth = max_depth - 1, 
+      max_months = max_months - clv_tree$customer$months,
+      default_length = default_length,
+      default_prob = default_prob,
+      revenue=revenue)
+  }
+  
+  return(clv_tree)
+}
+
+generateLifeTree.recurrence <- function(customer, continuation_model, churn_model, min_branch_probability, max_depth, max_months, default_length = 1, default_prob = 1, revenue = T){
+  probabilities <- predictContinuation(customer, continuation_model, default_length = default_length)
+    
   probabilities %>%
     imap(~{
       new_months <- as.numeric(.y)
@@ -34,7 +69,8 @@ predictContinuation <- function(customer, continuation_model, churn_model, min_b
       if(1 < max_depth & 
          0 < max_months - clv_tree$customer$months & 
          min_branch_probability/(clv_tree$probability * (1-clv_tree$churn_probability)) <= 1 ) {
-        clv_tree$continuation <- predictContinuation(
+        
+        clv_tree$continuation <- generateLifeTree.recurrence(
           clv_tree$customer, 
           continuation_model = continuation_model, 
           churn_model = churn_model,
@@ -48,34 +84,6 @@ predictContinuation <- function(customer, continuation_model, churn_model, min_b
       
       return(clv_tree)
     })
-}
-
-
-generateLifetimeTree <- function(customer, churn_model, continuation_model, min_branch_probability = 0.001, max_depth = Inf, max_months = Inf, default_length = 1, default_prob = 1, revenue = TRUE) {
-  customer <- as.list(customer)
-  
-  clv_tree <- list(
-    probability = 1,
-    customer = customer,
-    churn_probability = predictChurn(customer, churn_model,  default_prob = default_prob)[[1]]
-  )
-  if(1 < max_depth & 
-     0 < max_months - clv_tree$customer$months & 
-     min_branch_probability/(clv_tree$probability * (1-clv_tree$churn_probability)) <= 1 ) {
-    
-    clv_tree$continuation = predictContinuation(
-      clv_tree$customer, 
-      continuation_model = continuation_model, 
-      churn_model = churn_model,
-      min_branch_probability = min_branch_probability/(clv_tree$probability * (1-clv_tree$churn_probability)),
-      max_depth = max_depth - 1, 
-      max_months = max_months - clv_tree$customer$months,
-      default_length = default_length,
-      default_prob = default_prob,
-      revenue=revenue)
-  }
-  
-  return(clv_tree)
 }
 
 # Calculate CLV for customer 
@@ -98,6 +106,26 @@ expectedValue <-  function(customer_simulation, type = 'revenue', default_val = 
   return(value + (tail_value * (1 - customer_simulation$churn_probability)))
 }
 
+# Most likely path
+mostLikelyPath <- function(clv_tree, probability = 1, omit_first_churn = F){
+  
+  if(clv_tree$churn_probability > 0.5 & !omit_first_churn) {
+    return(data.frame(outcome = 'churn', probability = clv_tree$churn_probability * probability, stringsAsFactors = F))
+  }
+  
+  if(is.null(clv_tree$continuation)) return(data.frame())
+  
+  tmp <- clv_tree$continuation %>%
+    reduce(~{
+      if(.x$probability < .y$probability) return(.y)
+      return(.x)
+    }, .init = list(probability = -1))
+  
+  return(bind_rows(mostLikelyPath(tmp, probability * (1-clv_tree$churn_probability) * tmp$probability),
+                   data.frame(outcome = as.character(tmp$customer$months), 
+                              probability = probability * (1-clv_tree$churn_probability) * tmp$probability, 
+                              stringsAsFactors = F)))
+}
 
 # Customer operations
 revenueCurr <- function(months) months * 10
